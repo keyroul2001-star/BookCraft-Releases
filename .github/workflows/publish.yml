@@ -14,8 +14,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
       - name: Install Android build tools
-        run: sdkmanager 'build-tools;35.0.0'
+        run: |
+          set -euo pipefail
+          sdk="$RUNNER_TEMP/bookcraft-android"
+          mkdir -p "$sdk"
+          curl --fail --location --silent --show-error --retry 3 https://dl.google.com/android/repository/build-tools_r35_linux.zip -o "$sdk/build.zip"
+          printf '%s  %s\n' bd3a4966912eb8b30ed0d00b0cda6b6543b949d5ffe00bea54c04c81e1561d88 "$sdk/build.zip" | sha256sum --check
+          unzip -q "$sdk/build.zip" -d "$sdk"
+          printf 'BOOKCRAFT_ANDROID_TOOLS=%s\n' "$sdk/android-15" >> "$GITHUB_ENV"
       - name: Check package and publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -24,7 +35,7 @@ jobs:
           version="$(cat channel/version.txt)"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           apk="BookCraft-$version.apk"
-          tools="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools/35.0.0"
+          tools="$BOOKCRAFT_ANDROID_TOOLS"
           (cd channel && sha256sum --check "$apk.sha256")
           expected="$(cat release-signing-cert.sha256)"
           actual="$("$tools/apksigner" verify --print-certs "channel/$apk" | awk '/^Signer #1 certificate SHA-256 digest:/ {print $NF}')"
