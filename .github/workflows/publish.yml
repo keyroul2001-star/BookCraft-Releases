@@ -1,0 +1,39 @@
+name: Publish BookCraft APK
+on:
+  push:
+    branches: [main]
+    paths: ['channel/**', '.github/workflows/publish.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: bookcraft-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Android build tools
+        run: sdkmanager 'build-tools;35.0.0'
+      - name: Check package and publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(cat channel/version.txt)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          apk="BookCraft-$version.apk"
+          tools="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools/35.0.0"
+          (cd channel && sha256sum --check "$apk.sha256")
+          expected="$(cat release-signing-cert.sha256)"
+          actual="$("$tools/apksigner" verify --print-certs "channel/$apk" | awk '/^Signer #1 certificate SHA-256 digest:/ {print $NF}')"
+          test "$actual" = "$expected"
+          package="$("$tools/aapt2" dump badging "channel/$apk" | sed -n '1p')"
+          [[ "$package" == *"name='my.bookcraft.studio'"* && "$package" == *"versionName='$version'"* ]]
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$version already exists."
+            exit 0
+          fi
+          gh release create "v$version" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "BookCraft $version" --notes-file channel/notes.md --latest "channel/$apk" "channel/$apk.sha256"
